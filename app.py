@@ -138,40 +138,33 @@ pros["Z_IP90"] = pros["IP90_resid"] / ip90_std
 pros["Z_1Y"] = pros["Y1_resid"] / y1_std
 
 # ---------------------------------------------------------------------------
-# 6. SIDEBAR SETTINGS: Z-weight sliders (sum = 100%)
+# 6. SIDEBAR SETTINGS: user must provide 3 weights summing to 100
 # ---------------------------------------------------------------------------
-st.sidebar.header("Classification Settings (weights sum to 100%)")
+st.sidebar.header("Classification Settings (weights must sum to 100)")
 
-# User sets EUR and 1Y; IP90 is automatically calculated
-w_eur_pct = st.sidebar.slider("Weight EUR (%)", 0, 100, 50, 1)
-w_y1_pct = st.sidebar.slider("Weight 1Y Cumulative (%)", 0, 100 - w_eur_pct, 25, 1)
-w_ip90_pct = 100 - w_eur_pct - w_y1_pct
+w_eur = st.sidebar.number_input("Weight EUR (%)", min_value=0, max_value=100, value=50, step=1)
+w_y1 = st.sidebar.number_input("Weight 1Y (%)", min_value=0, max_value=100, value=25, step=1)
+w_ip90 = st.sidebar.number_input("Weight IP90 (%)", min_value=0, max_value=100, value=25, step=1)
 
-st.sidebar.markdown(f"Weight IP90 (%) = {w_ip90_pct} (automatically)")
+weight_sum = w_eur + w_y1 + w_ip90
 
-# Convert to fractions (0–1)
-w_eur = w_eur_pct / 100
-w_y1 = w_y1_pct / 100
-w_ip90 = w_ip90_pct / 100
+if weight_sum != 100:
+    st.sidebar.error(f"Weights must sum to 100! Current sum: {weight_sum}")
+    st.stop()
 
-st.sidebar.markdown(
-    f"Normalized weights: EUR={w_eur:.2f}, 1Y={w_y1:.2f}, IP90={w_ip90:.2f}"
-)
+# Convert percentages to fractions for calculation
+w_eur /= 100
+w_y1 /= 100
+w_ip90 /= 100
 
 threshold = st.sidebar.slider(
     "Composite Z-score threshold (σ)",
     0.1, 2.0, 0.5, 0.05
 )
 
-st.sidebar.markdown(
-    """
-    Weighted composite classification:
-    - Slider weights control influence of each metric.
-    - Threshold controls number of σ deviations to classify Above/Below Trend.
-    """
-)
-
-# Weighted composite Z
+# ---------------------------------------------------------------------------
+# Weighted composite Z-score
+# ---------------------------------------------------------------------------
 pros["Composite_Z"] = (
     w_eur * pros["Z_EUR"] +
     w_y1 * pros["Z_1Y"] +
@@ -189,7 +182,7 @@ def classify(z):
 pros["Classification"] = pros["Composite_Z"].apply(classify)
 
 # ---------------------------------------------------------------------------
-# 7. PLOTS: all 3 metrics + composite
+# 7. PLOTS
 # ---------------------------------------------------------------------------
 color_map = {
     "Above Trend": "#2ca02c",
