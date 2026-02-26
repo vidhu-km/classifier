@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 from sklearn.linear_model import LinearRegression
 
 st.set_page_config(layout="wide")
-st.title("Viewfield Bakken Well Classification Tool")
+st.title("2M Classifier")
 
 # ---------------------------------------------------------------------------
 # 1. DATA LOADING
