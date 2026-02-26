@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 from sklearn.linear_model import LinearRegression
 
 st.set_page_config(layout="wide")
-st.title("Proposed 2M Classification Tool")
+st.title("Viewfield Bakken Well Classification Tool")
 
 # ---------------------------------------------------------------------------
 # 1. DATA LOADING
@@ -41,22 +41,22 @@ def find_col(df, keywords, exclude=None):
 sec_col_eur = find_col(field_eur, ["section"], exclude=["ooip", "eur", "ip", "cuml"])
 ooip_col = find_col(field_eur, ["ooip"])
 eur_col = find_col(field_eur, ["eur"])
-sec_col_ip90 = find_col(field_ip90, ["section"], exclude=["ip90", "ip", "eur"])
-ip90_col = find_col(field_ip90, ["ip90", "ip 90"])
-sec_col_1y = find_col(field_1y, ["section"], exclude=["cuml", "1y"])
-y1_col = find_col(field_1y, ["1y", "cuml", "cumul"])
+sec_col_ip90 = find_col(field_ip90, ["section"], exclude=["ip90"])
+ip90_col = find_col(field_ip90, ["ip90"])
+sec_col_1y = find_col(field_1y, ["section"], exclude=["1y", "cuml"])
+y1_col = find_col(field_1y, ["1y", "cuml"])
 
 # Prospect sheet
 p_ooip = find_col(prospects, ["ooip"])
 p_eur = find_col(prospects, ["eur"])
 p_ip90 = find_col(prospects, ["ip90"])
+p_1y = find_col(prospects, ["1y", "cuml"])
 p_uwi = find_col(prospects, ["uwi", "well", "name"])
 
 required = {
-    "Section (EUR)": sec_col_eur, "OOIP": ooip_col, "EUR": eur_col,
-    "Section (IP90)": sec_col_ip90, "IP90": ip90_col,
-    "Section (1Y)": sec_col_1y, "1Y Cuml": y1_col,
-    "Prospect OOIP": p_ooip, "Prospect EUR": p_eur, "Prospect IP90": p_ip90,
+    "Section": sec_col_eur, "OOIP": ooip_col, "EUR": eur_col,
+    "IP90": ip90_col, "1Y": y1_col,
+    "Prospect OOIP": p_ooip, "Prospect EUR": p_eur, "Prospect IP90": p_ip90, "Prospect 1Y": p_1y
 }
 missing = [k for k, v in required.items() if v is None]
 if missing:
@@ -67,17 +67,19 @@ if missing:
 # 3. MERGE FIELD DATA
 # ---------------------------------------------------------------------------
 field = field_eur[[sec_col_eur, ooip_col, eur_col]].copy()
+
 field = field.merge(
     field_ip90[[sec_col_ip90, ip90_col]].rename(columns={sec_col_ip90: sec_col_eur}),
     on=sec_col_eur,
 )
+
 field = field.merge(
     field_1y[[sec_col_1y, y1_col]].rename(columns={sec_col_1y: sec_col_eur}),
     on=sec_col_eur,
 )
 
 field.columns = ["Section", "OOIP", "EUR", "IP90", "1Y"]
-field.dropna(subset=["OOIP", "EUR", "IP90", "1Y"], inplace=True)
+field.dropna(inplace=True)
 
 # ---------------------------------------------------------------------------
 # 4. FIT FIELD TRENDS
@@ -92,10 +94,16 @@ def fit_trend(x, y):
 
 eur_model = fit_trend(field["OOIP"], field["EUR"])
 ip90_model = fit_trend(field["OOIP"], field["IP90"])
+y1_model = fit_trend(field["OOIP"], field["1Y"])
 
-field["EUR_pred"] = eur_model.predict(field["OOIP"].values.reshape(-1, 1))
-field["EUR_resid"] = field["EUR"] - field["EUR_pred"]
-field_resid_std = field["EUR_resid"].std()
+# Field residuals
+field["EUR_resid"] = field["EUR"] - eur_model.predict(field["OOIP"].values.reshape(-1, 1))
+field["IP90_resid"] = field["IP90"] - ip90_model.predict(field["OOIP"].values.reshape(-1, 1))
+field["Y1_resid"] = field["1Y"] - y1_model.predict(field["OOIP"].values.reshape(-1, 1))
+
+eur_std = field["EUR_resid"].std()
+ip90_std = field["IP90_resid"].std()
+y1_std = field["Y1_resid"].std()
 
 # ---------------------------------------------------------------------------
 # 5. SCORE PROSPECTS
@@ -103,7 +111,8 @@ field_resid_std = field["EUR_resid"].std()
 pros = prospects.rename(columns={
     p_ooip: "SectionOOIP",
     p_eur: "Projected EUR",
-    p_ip90: "Projected IP90"
+    p_ip90: "Projected IP90",
+    p_1y: "Projected 1Y"
 })
 
 if p_uwi:
@@ -111,17 +120,22 @@ if p_uwi:
 else:
     pros["UWI"] = pros.index.astype(str)
 
-pros.dropna(subset=["SectionOOIP", "Projected EUR", "Projected IP90"], inplace=True)
+pros.dropna(subset=["SectionOOIP", "Projected EUR", "Projected IP90", "Projected 1Y"], inplace=True)
 
-pros["Predicted EUR"] = eur_model.predict(
-    pros["SectionOOIP"].values.reshape(-1, 1)
-)
-pros["Predicted IP90"] = ip90_model.predict(
-    pros["SectionOOIP"].values.reshape(-1, 1)
-)
+# Predictions
+pros["EUR_pred"] = eur_model.predict(pros["SectionOOIP"].values.reshape(-1, 1))
+pros["IP90_pred"] = ip90_model.predict(pros["SectionOOIP"].values.reshape(-1, 1))
+pros["Y1_pred"] = y1_model.predict(pros["SectionOOIP"].values.reshape(-1, 1))
 
-pros["EUR Residual"] = pros["Projected EUR"] - pros["Predicted EUR"]
-pros["Efficiency"] = pros["Projected EUR"] / pros["SectionOOIP"]
+# Residuals
+pros["EUR_resid"] = pros["Projected EUR"] - pros["EUR_pred"]
+pros["IP90_resid"] = pros["Projected IP90"] - pros["IP90_pred"]
+pros["Y1_resid"] = pros["Projected 1Y"] - pros["Y1_pred"]
+
+# Z-scores
+pros["Z_EUR"] = pros["EUR_resid"] / eur_std
+pros["Z_IP90"] = pros["IP90_resid"] / ip90_std
+pros["Z_1Y"] = pros["Y1_resid"] / y1_std
 
 # ---------------------------------------------------------------------------
 # 6. SIDEBAR SETTINGS
@@ -129,49 +143,39 @@ pros["Efficiency"] = pros["Projected EUR"] / pros["SectionOOIP"]
 st.sidebar.header("Classification Settings")
 
 threshold = st.sidebar.slider(
-    "Residual threshold (× field σ)",
-    min_value=0.1,
-    max_value=2.0,
-    value=0.5,
-    step=0.1
+    "Composite Z-score threshold (σ)",
+    0.1, 2.0, 0.5, 0.1
 )
 
 st.sidebar.markdown(
     """
-    **What this does:**  
-    The slider controls how far a prospect's EUR must deviate 
-    from the field trend (measured in standard deviations, σ) 
-    before it is labeled:
+    Weighted composite classification:
 
-    • Above Trend  
-    • On Trend  
-    • Below Trend  
+    - EUR: 50%  
+    - 1Y cumulative: 25%  
+    - IP90: 25%  
 
-    Smaller values = more sensitive classification  
-    Larger values = stricter classification
+    The slider controls how many composite σ deviations classify Above/Below Trend.
     """
 )
 
-cutoff = threshold * field_resid_std
+# Weighted composite Z-score
+pros["Composite_Z"] = 0.5 * pros["Z_EUR"] + 0.25 * pros["Z_1Y"] + 0.25 * pros["Z_IP90"]
 
-def classify(resid):
-    if resid > cutoff:
+def classify(z):
+    if z > threshold:
         return "Above Trend"
-    elif resid < -cutoff:
+    elif z < -threshold:
         return "Below Trend"
     else:
         return "On Trend"
 
-pros["Classification"] = pros["EUR Residual"].apply(classify)
+pros["Classification"] = pros["Composite_Z"].apply(classify)
 
 # ---------------------------------------------------------------------------
-# 7. PLOTS (NOW AT TOP)
+# 7. PLOTS
 # ---------------------------------------------------------------------------
-st.markdown("## 📊 Prospect vs Field Trend")
-
-x_lo = min(field["OOIP"].min(), pros["SectionOOIP"].min()) * 0.9
-x_hi = max(field["OOIP"].max(), pros["SectionOOIP"].max()) * 1.1
-x_trend = np.linspace(x_lo, x_hi, 200)
+st.markdown("## 📊 Prospect vs Field Trend (Weighted Composite Classification)")
 
 color_map = {
     "Above Trend": "#2ca02c",
@@ -200,30 +204,22 @@ with col1:
         marker=dict(color="lightgrey", size=6)
     ))
 
-    fig1.add_trace(go.Scatter(
-        x=x_trend,
-        y=eur_model.predict(x_trend.reshape(-1, 1)),
-        mode="lines",
-        name="Field Trend",
-        line=dict(dash="dash", color="black")
-    ))
-
     st.plotly_chart(fig1, use_container_width=True)
 
 with col2:
     fig2 = px.scatter(
         pros,
         x="SectionOOIP",
-        y="EUR Residual",
+        y="Composite_Z",
         color="Classification",
         color_discrete_map=color_map,
         hover_data=["UWI"],
-        title="EUR Residual vs Section OOIP"
+        title="Weighted Composite Z-Score"
     )
 
+    fig2.add_hline(y=threshold, line_dash="dot", line_color="green")
+    fig2.add_hline(y=-threshold, line_dash="dot", line_color="red")
     fig2.add_hline(y=0, line_dash="dash", line_color="black")
-    fig2.add_hline(y=cutoff, line_dash="dot", line_color="green")
-    fig2.add_hline(y=-cutoff, line_dash="dot", line_color="red")
 
     st.plotly_chart(fig2, use_container_width=True)
 
@@ -233,19 +229,13 @@ with col2:
 st.markdown("## Classified Prospects")
 
 display_cols = [
-    "UWI", "SectionOOIP", "Projected EUR",
-    "Predicted EUR", "EUR Residual",
-    "Efficiency", "Classification"
+    "UWI", "SectionOOIP",
+    "Projected EUR", "Projected 1Y", "Projected IP90",
+    "Z_EUR", "Z_1Y", "Z_IP90",
+    "Composite_Z", "Classification"
 ]
 
 st.dataframe(pros[display_cols], use_container_width=True)
-
-st.markdown("## Summary")
-
-summary = pros["Classification"].value_counts().reset_index()
-summary.columns = ["Classification", "Count"]
-
-st.dataframe(summary, use_container_width=True)
 
 # ---------------------------------------------------------------------------
 # 9. DOWNLOAD
