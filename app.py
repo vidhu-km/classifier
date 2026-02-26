@@ -81,9 +81,6 @@ field = field.merge(
 field.columns = ["Section", "OOIP", "EUR", "IP90", "1Y"]
 field.dropna(subset=["OOIP", "EUR", "IP90", "1Y"], inplace=True)
 
-st.subheader("Field Data")
-st.dataframe(field, use_container_width=True)
-
 # ---------------------------------------------------------------------------
 # 4. FIT TRENDS FROM FIELD DATA
 # ---------------------------------------------------------------------------
@@ -100,7 +97,7 @@ ip90_model = fit_trend(field["OOIP"], field["IP90"])
 field["EUR_pred"] = eur_model.predict(field["OOIP"].values.reshape(-1, 1))
 field["EUR_resid"] = field["EUR"] - field["EUR_pred"]
 
-# Use FIELD residual distribution for thresholds (not prospect residuals)
+# Use FIELD residual distribution for thresholds
 field_resid_std = field["EUR_resid"].std()
 
 st.caption(
@@ -111,7 +108,12 @@ st.caption(
 # ---------------------------------------------------------------------------
 # 5. SCORE PROSPECTS AGAINST FIELD TREND
 # ---------------------------------------------------------------------------
-pros = prospects.rename(columns={p_ooip: "SectionOOIP", p_eur: "Projected EUR", p_ip90: "Projected IP90"})
+pros = prospects.rename(columns={
+    p_ooip: "SectionOOIP",
+    p_eur: "Projected EUR",
+    p_ip90: "Projected IP90"
+})
+
 if p_uwi:
     pros = pros.rename(columns={p_uwi: "UWI"})
 else:
@@ -125,13 +127,7 @@ pros["EUR Residual"] = pros["Projected EUR"] - pros["Predicted EUR"]
 pros["Efficiency"] = pros["Projected EUR"] / pros["SectionOOIP"]
 
 # ---------------------------------------------------------------------------
-# 6. CLASSIFICATION — Simple 3-tier based on field residual spread
-#
-#    Above trend by > 0.5σ  →  Above Trend (outperformer)
-#    Within ±0.5σ           →  On Trend (average)
-#    Below trend by > 0.5σ  →  Below Trend (underperformer)
-#
-#    User can adjust the threshold with a slider.
+# 6. CLASSIFICATION
 # ---------------------------------------------------------------------------
 st.subheader("Classification Settings")
 threshold = st.slider(
@@ -155,8 +151,11 @@ def classify(resid):
 pros["Classification"] = pros["EUR Residual"].apply(classify)
 
 st.subheader("Classified Prospects")
-display_cols = ["UWI", "SectionOOIP", "Projected EUR", "Predicted EUR",
-                "EUR Residual", "Efficiency", "Classification"]
+display_cols = [
+    "UWI", "SectionOOIP", "Projected EUR",
+    "Predicted EUR", "EUR Residual",
+    "Efficiency", "Classification"
+]
 st.dataframe(pros[display_cols], use_container_width=True)
 
 # Summary
@@ -172,35 +171,54 @@ x_lo = min(field["OOIP"].min(), pros["SectionOOIP"].min()) * 0.9
 x_hi = max(field["OOIP"].max(), pros["SectionOOIP"].max()) * 1.1
 x_trend = np.linspace(x_lo, x_hi, 200)
 
-color_map = {"Above Trend": "#2ca02c", "On Trend": "#1f77b4", "Below Trend": "#d62728"}
+color_map = {
+    "Above Trend": "#2ca02c",
+    "On Trend": "#1f77b4",
+    "Below Trend": "#d62728"
+}
 
 col1, col2 = st.columns(2)
 
 with col1:
     fig1 = px.scatter(
-        pros, x="SectionOOIP", y="Projected EUR", color="Classification",
-        color_discrete_map=color_map, hover_data=["UWI"],
+        pros, x="SectionOOIP", y="Projected EUR",
+        color="Classification",
+        color_discrete_map=color_map,
+        hover_data=["UWI"],
         title="Projected EUR vs Section OOIP",
     )
     fig1.add_trace(go.Scatter(
-        x=field["OOIP"], y=field["EUR"], mode="markers", name="Field Wells",
-        marker=dict(color="lightgrey", size=6, line=dict(width=0.5, color="grey")),
+        x=field["OOIP"],
+        y=field["EUR"],
+        mode="markers",
+        name="Field Wells",
+        marker=dict(color="lightgrey", size=6,
+                    line=dict(width=0.5, color="grey")),
     ))
     fig1.add_trace(go.Scatter(
-        x=x_trend, y=eur_model.predict(x_trend.reshape(-1, 1)),
-        mode="lines", name="Field Trend", line=dict(dash="dash", color="black"),
+        x=x_trend,
+        y=eur_model.predict(x_trend.reshape(-1, 1)),
+        mode="lines",
+        name="Field Trend",
+        line=dict(dash="dash", color="black"),
     ))
     st.plotly_chart(fig1, use_container_width=True)
 
 with col2:
     fig2 = px.scatter(
-        pros, x="SectionOOIP", y="EUR Residual", color="Classification",
-        color_discrete_map=color_map, hover_data=["UWI"],
+        pros, x="SectionOOIP", y="EUR Residual",
+        color="Classification",
+        color_discrete_map=color_map,
+        hover_data=["UWI"],
         title="EUR Residual vs Section OOIP",
     )
     fig2.add_hline(y=0, line_dash="dash", line_color="black")
-    fig2.add_hline(y=cutoff, line_dash="dot", line_color="green", annotation_text=f"+{threshold}σ")
-    fig2.add_hline(y=-cutoff, line_dash="dot", line_color="red", annotation_text=f"-{threshold}σ")
+    fig2.add_hline(y=cutoff, line_dash="dot",
+                   line_color="green",
+                   annotation_text=f"+{threshold}σ")
+    fig2.add_hline(y=-cutoff, line_dash="dot",
+                   line_color="red",
+                   annotation_text=f"-{threshold}σ")
     st.plotly_chart(fig2, use_container_width=True)
 
 # ---------------------------------------------------------------------------
