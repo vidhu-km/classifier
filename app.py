@@ -138,29 +138,39 @@ pros["Z_IP90"] = pros["IP90_resid"] / ip90_std
 pros["Z_1Y"] = pros["Y1_resid"] / y1_std
 
 # ---------------------------------------------------------------------------
-# 6. SIDEBAR SETTINGS
+# 6. SIDEBAR SETTINGS: Z-weight sliders
 # ---------------------------------------------------------------------------
 st.sidebar.header("Classification Settings")
 
+w_eur = st.sidebar.slider("Weight EUR", 0.0, 1.0, 0.5, 0.05)
+w_y1 = st.sidebar.slider("Weight 1Y Cumulative", 0.0, 1.0, 0.25, 0.05)
+w_ip90 = st.sidebar.slider("Weight IP90", 0.0, 1.0, 0.25, 0.05)
+
+# Normalize weights
+total_w = w_eur + w_y1 + w_ip90
+w_eur /= total_w
+w_y1 /= total_w
+w_ip90 /= total_w
+
 threshold = st.sidebar.slider(
     "Composite Z-score threshold (σ)",
-    0.1, 2.0, 0.5, 0.1
+    0.1, 2.0, 0.5, 0.05
 )
 
 st.sidebar.markdown(
     """
     Weighted composite classification:
-
-    - EUR: 50%  
-    - 1Y cumulative: 25%  
-    - IP90: 25%  
-
-    The slider controls how many composite σ deviations classify Above/Below Trend.
+    - Slider weights control influence of each metric.
+    - Threshold controls number of σ deviations to classify Above/Below Trend.
     """
 )
 
-# Weighted composite Z-score
-pros["Composite_Z"] = 0.5 * pros["Z_EUR"] + 0.25 * pros["Z_1Y"] + 0.25 * pros["Z_IP90"]
+# Weighted composite Z
+pros["Composite_Z"] = (
+    w_eur * pros["Z_EUR"] +
+    w_y1 * pros["Z_1Y"] +
+    w_ip90 * pros["Z_IP90"]
+)
 
 def classify(z):
     if z > threshold:
@@ -173,73 +183,86 @@ def classify(z):
 pros["Classification"] = pros["Composite_Z"].apply(classify)
 
 # ---------------------------------------------------------------------------
-# 7. PLOTS
+# 7. PLOTS: all 3 metrics + composite
 # ---------------------------------------------------------------------------
-st.markdown("## 📊 Prospect vs Field Trend (Weighted Composite Classification)")
-
 color_map = {
     "Above Trend": "#2ca02c",
     "On Trend": "#1f77b4",
     "Below Trend": "#d62728"
 }
 
+st.markdown("## 📊 Performance Charts")
+
 col1, col2 = st.columns(2)
 
 with col1:
-    fig1 = px.scatter(
-        pros,
-        x="SectionOOIP",
-        y="Projected EUR",
-        color="Classification",
-        color_discrete_map=color_map,
-        hover_data=["UWI"],
-        title="Projected EUR vs Section OOIP"
+    fig_eur = px.scatter(
+        pros, x="SectionOOIP", y="Projected EUR",
+        color="Classification", color_discrete_map=color_map,
+        hover_data=["UWI"], title="EUR vs Section OOIP"
     )
-
-    fig1.add_trace(go.Scatter(
-        x=field["OOIP"],
-        y=field["EUR"],
-        mode="markers",
-        name="Field Wells",
+    fig_eur.add_trace(go.Scatter(
+        x=field["OOIP"], y=field["EUR"],
+        mode="markers", name="Field Wells",
         marker=dict(color="lightgrey", size=6)
     ))
+    st.plotly_chart(fig_eur, use_container_width=True)
 
-    st.plotly_chart(fig1, use_container_width=True)
+    fig_ip90 = px.scatter(
+        pros, x="SectionOOIP", y="Projected IP90",
+        color="Classification", color_discrete_map=color_map,
+        hover_data=["UWI"], title="IP90 vs Section OOIP"
+    )
+    fig_ip90.add_trace(go.Scatter(
+        x=field["OOIP"], y=field["IP90"],
+        mode="markers", name="Field Wells",
+        marker=dict(color="lightgrey", size=6)
+    ))
+    st.plotly_chart(fig_ip90, use_container_width=True)
 
 with col2:
-    fig2 = px.scatter(
-        pros,
-        x="SectionOOIP",
-        y="Composite_Z",
-        color="Classification",
-        color_discrete_map=color_map,
-        hover_data=["UWI"],
-        title="Weighted Composite Z-Score"
+    fig_y1 = px.scatter(
+        pros, x="SectionOOIP", y="Projected 1Y",
+        color="Classification", color_discrete_map=color_map,
+        hover_data=["UWI"], title="1Y Cumulative vs Section OOIP"
     )
+    fig_y1.add_trace(go.Scatter(
+        x=field["OOIP"], y=field["1Y"],
+        mode="markers", name="Field Wells",
+        marker=dict(color="lightgrey", size=6)
+    ))
+    st.plotly_chart(fig_y1, use_container_width=True)
 
-    fig2.add_hline(y=threshold, line_dash="dot", line_color="green")
-    fig2.add_hline(y=-threshold, line_dash="dot", line_color="red")
-    fig2.add_hline(y=0, line_dash="dash", line_color="black")
-
-    st.plotly_chart(fig2, use_container_width=True)
+    fig_comp = px.scatter(
+        pros, x="SectionOOIP", y="Composite_Z",
+        color="Classification", color_discrete_map=color_map,
+        hover_data=["UWI"], title="Weighted Composite Z-Score"
+    )
+    fig_comp.add_hline(y=threshold, line_dash="dot", line_color="green")
+    fig_comp.add_hline(y=-threshold, line_dash="dot", line_color="red")
+    fig_comp.add_hline(y=0, line_dash="dash", line_color="black")
+    st.plotly_chart(fig_comp, use_container_width=True)
 
 # ---------------------------------------------------------------------------
-# 8. TABLES
+# 8. SUMMARY TABLE
+# ---------------------------------------------------------------------------
+st.markdown("## Summary")
+summary = pros["Classification"].value_counts().reset_index()
+summary.columns = ["Classification", "Count"]
+st.dataframe(summary, use_container_width=True)
+
+# ---------------------------------------------------------------------------
+# 9. DETAILED TABLE + DOWNLOAD
 # ---------------------------------------------------------------------------
 st.markdown("## Classified Prospects")
-
 display_cols = [
     "UWI", "SectionOOIP",
     "Projected EUR", "Projected 1Y", "Projected IP90",
     "Z_EUR", "Z_1Y", "Z_IP90",
     "Composite_Z", "Classification"
 ]
-
 st.dataframe(pros[display_cols], use_container_width=True)
 
-# ---------------------------------------------------------------------------
-# 9. DOWNLOAD
-# ---------------------------------------------------------------------------
 st.download_button(
     label="📥 Download Classified Prospects",
     data=pros[display_cols].to_csv(index=False),
