@@ -142,14 +142,14 @@ pros["Z_1Y"] = pros["Y1_resid"] / y1_std
 # ---------------------------------------------------------------------------
 st.sidebar.header("Classification Settings (weights sum to 100%)")
 
-# Step 1: Let user choose EUR and 1Y; IP90 is automatically calculated
+# User sets EUR and 1Y; IP90 is automatically calculated
 w_eur_pct = st.sidebar.slider("Weight EUR (%)", 0, 100, 50, 1)
 w_y1_pct = st.sidebar.slider("Weight 1Y Cumulative (%)", 0, 100 - w_eur_pct, 25, 1)
 w_ip90_pct = 100 - w_eur_pct - w_y1_pct
 
 st.sidebar.markdown(f"Weight IP90 (%) = {w_ip90_pct} (automatically)")
 
-# Step 2: Convert to fractions for calculation
+# Convert to fractions (0–1)
 w_eur = w_eur_pct / 100
 w_y1 = w_y1_pct / 100
 w_ip90 = w_ip90_pct / 100
@@ -158,12 +158,35 @@ st.sidebar.markdown(
     f"Normalized weights: EUR={w_eur:.2f}, 1Y={w_y1:.2f}, IP90={w_ip90:.2f}"
 )
 
-# Composite Z-score
+threshold = st.sidebar.slider(
+    "Composite Z-score threshold (σ)",
+    0.1, 2.0, 0.5, 0.05
+)
+
+st.sidebar.markdown(
+    """
+    Weighted composite classification:
+    - Slider weights control influence of each metric.
+    - Threshold controls number of σ deviations to classify Above/Below Trend.
+    """
+)
+
+# Weighted composite Z
 pros["Composite_Z"] = (
     w_eur * pros["Z_EUR"] +
     w_y1 * pros["Z_1Y"] +
     w_ip90 * pros["Z_IP90"]
 )
+
+def classify(z):
+    if z > threshold:
+        return "Above Trend"
+    elif z < -threshold:
+        return "Below Trend"
+    else:
+        return "On Trend"
+
+pros["Classification"] = pros["Composite_Z"].apply(classify)
 
 # ---------------------------------------------------------------------------
 # 7. PLOTS: all 3 metrics + composite
