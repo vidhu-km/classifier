@@ -34,13 +34,13 @@ except Exception as e:
 # 2. READ & VALIDATE SHEETS
 # ---------------------------------------------------------------------------
 try:
-    sheet_names = pd.ExcelFile(uploaded_file).sheet_names
+    sheet_names = pd.ExcelFile(FILE_PATH).sheet_names
     st.caption(f"Detected sheets: {sheet_names}")
 
-    field_eur = pd.read_excel(uploaded_file, sheet_name=0)
-    field_ip90 = pd.read_excel(uploaded_file, sheet_name=1)
-    field_1y = pd.read_excel(uploaded_file, sheet_name=2)
-    prospects = pd.read_excel(uploaded_file, sheet_name=3)
+    field_eur = pd.read_excel(FILE_PATH, sheet_name=0)
+    field_ip90 = pd.read_excel(FILE_PATH, sheet_name=1)
+    field_1y = pd.read_excel(FILE_PATH, sheet_name=2)
+    prospects = pd.read_excel(FILE_PATH, sheet_name=3)
 except Exception as e:
     st.error(f"Error reading Excel file: {e}")
     st.stop()
