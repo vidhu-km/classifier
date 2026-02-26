@@ -29,7 +29,6 @@ except Exception as e:
 # 2. COLUMN DETECTION
 # ---------------------------------------------------------------------------
 def find_col(df, keywords, exclude=None):
-    """Return first column containing any keyword (case-insensitive)."""
     for col in df.columns:
         low = col.lower()
         if exclude and any(ex.lower() in low for ex in exclude):
@@ -38,13 +37,12 @@ def find_col(df, keywords, exclude=None):
             return col
     return None
 
-
 # Field sheets
 sec_col_eur = find_col(field_eur, ["section"], exclude=["ooip", "eur", "ip", "cuml"])
 ooip_col = find_col(field_eur, ["ooip"])
 eur_col = find_col(field_eur, ["eur"])
 sec_col_ip90 = find_col(field_ip90, ["section"], exclude=["ip90", "ip", "eur"])
-ip90_col = find_col(field_ip90, ["ip90", "ip 90", "average section ip90"])
+ip90_col = find_col(field_ip90, ["ip90", "ip 90"])
 sec_col_1y = find_col(field_1y, ["section"], exclude=["cuml", "1y"])
 y1_col = find_col(field_1y, ["1y", "cuml", "cumul"])
 
@@ -54,7 +52,6 @@ p_eur = find_col(prospects, ["eur"])
 p_ip90 = find_col(prospects, ["ip90"])
 p_uwi = find_col(prospects, ["uwi", "well", "name"])
 
-# Validate
 required = {
     "Section (EUR)": sec_col_eur, "OOIP": ooip_col, "EUR": eur_col,
     "Section (IP90)": sec_col_ip90, "IP90": ip90_col,
@@ -78,35 +75,30 @@ field = field.merge(
     field_1y[[sec_col_1y, y1_col]].rename(columns={sec_col_1y: sec_col_eur}),
     on=sec_col_eur,
 )
+
 field.columns = ["Section", "OOIP", "EUR", "IP90", "1Y"]
 field.dropna(subset=["OOIP", "EUR", "IP90", "1Y"], inplace=True)
 
 # ---------------------------------------------------------------------------
-# 4. FIT TRENDS FROM FIELD DATA
+# 4. FIT FIELD TRENDS
 # ---------------------------------------------------------------------------
 def fit_trend(x, y):
     mask = np.isfinite(x) & np.isfinite(y)
-    model = LinearRegression().fit(x[mask].values.reshape(-1, 1), y[mask].values)
+    model = LinearRegression().fit(
+        x[mask].values.reshape(-1, 1),
+        y[mask].values
+    )
     return model
-
 
 eur_model = fit_trend(field["OOIP"], field["EUR"])
 ip90_model = fit_trend(field["OOIP"], field["IP90"])
 
-# Compute field residuals to establish the baseline distribution
 field["EUR_pred"] = eur_model.predict(field["OOIP"].values.reshape(-1, 1))
 field["EUR_resid"] = field["EUR"] - field["EUR_pred"]
-
-# Use FIELD residual distribution for thresholds
 field_resid_std = field["EUR_resid"].std()
 
-st.caption(
-    f"EUR trend: {eur_model.coef_[0]:.4f} × OOIP + {eur_model.intercept_:.1f}  |  "
-    f"Field residual σ = {field_resid_std:,.0f}"
-)
-
 # ---------------------------------------------------------------------------
-# 5. SCORE PROSPECTS AGAINST FIELD TREND
+# 5. SCORE PROSPECTS
 # ---------------------------------------------------------------------------
 pros = prospects.rename(columns={
     p_ooip: "SectionOOIP",
@@ -121,23 +113,46 @@ else:
 
 pros.dropna(subset=["SectionOOIP", "Projected EUR", "Projected IP90"], inplace=True)
 
-pros["Predicted EUR"] = eur_model.predict(pros["SectionOOIP"].values.reshape(-1, 1))
-pros["Predicted IP90"] = ip90_model.predict(pros["SectionOOIP"].values.reshape(-1, 1))
+pros["Predicted EUR"] = eur_model.predict(
+    pros["SectionOOIP"].values.reshape(-1, 1)
+)
+pros["Predicted IP90"] = ip90_model.predict(
+    pros["SectionOOIP"].values.reshape(-1, 1)
+)
+
 pros["EUR Residual"] = pros["Projected EUR"] - pros["Predicted EUR"]
 pros["Efficiency"] = pros["Projected EUR"] / pros["SectionOOIP"]
 
 # ---------------------------------------------------------------------------
-# 6. CLASSIFICATION
+# 6. SIDEBAR SETTINGS
 # ---------------------------------------------------------------------------
-st.subheader("Classification Settings")
-threshold = st.slider(
+st.sidebar.header("Classification Settings")
+
+threshold = st.sidebar.slider(
     "Residual threshold (× field σ)",
-    min_value=0.1, max_value=2.0, value=0.5, step=0.1,
-    help="How many field standard deviations from trend to call above/below."
+    min_value=0.1,
+    max_value=2.0,
+    value=0.5,
+    step=0.1
+)
+
+st.sidebar.markdown(
+    """
+    **What this does:**  
+    The slider controls how far a prospect's EUR must deviate 
+    from the field trend (measured in standard deviations, σ) 
+    before it is labeled:
+
+    • Above Trend  
+    • On Trend  
+    • Below Trend  
+
+    Smaller values = more sensitive classification  
+    Larger values = stricter classification
+    """
 )
 
 cutoff = threshold * field_resid_std
-
 
 def classify(resid):
     if resid > cutoff:
@@ -147,26 +162,13 @@ def classify(resid):
     else:
         return "On Trend"
 
-
 pros["Classification"] = pros["EUR Residual"].apply(classify)
 
-st.subheader("Classified Prospects")
-display_cols = [
-    "UWI", "SectionOOIP", "Projected EUR",
-    "Predicted EUR", "EUR Residual",
-    "Efficiency", "Classification"
-]
-st.dataframe(pros[display_cols], use_container_width=True)
-
-# Summary
-st.subheader("Summary")
-summary = pros["Classification"].value_counts().reset_index()
-summary.columns = ["Classification", "Count"]
-st.dataframe(summary, use_container_width=True)
-
 # ---------------------------------------------------------------------------
-# 7. PLOTS
+# 7. PLOTS (NOW AT TOP)
 # ---------------------------------------------------------------------------
+st.markdown("## 📊 Prospect vs Field Trend")
+
 x_lo = min(field["OOIP"].min(), pros["SectionOOIP"].min()) * 0.9
 x_hi = max(field["OOIP"].max(), pros["SectionOOIP"].max()) * 1.1
 x_trend = np.linspace(x_lo, x_hi, 200)
@@ -181,48 +183,72 @@ col1, col2 = st.columns(2)
 
 with col1:
     fig1 = px.scatter(
-        pros, x="SectionOOIP", y="Projected EUR",
+        pros,
+        x="SectionOOIP",
+        y="Projected EUR",
         color="Classification",
         color_discrete_map=color_map,
         hover_data=["UWI"],
-        title="Projected EUR vs Section OOIP",
+        title="Projected EUR vs Section OOIP"
     )
+
     fig1.add_trace(go.Scatter(
         x=field["OOIP"],
         y=field["EUR"],
         mode="markers",
         name="Field Wells",
-        marker=dict(color="lightgrey", size=6,
-                    line=dict(width=0.5, color="grey")),
+        marker=dict(color="lightgrey", size=6)
     ))
+
     fig1.add_trace(go.Scatter(
         x=x_trend,
         y=eur_model.predict(x_trend.reshape(-1, 1)),
         mode="lines",
         name="Field Trend",
-        line=dict(dash="dash", color="black"),
+        line=dict(dash="dash", color="black")
     ))
+
     st.plotly_chart(fig1, use_container_width=True)
 
 with col2:
     fig2 = px.scatter(
-        pros, x="SectionOOIP", y="EUR Residual",
+        pros,
+        x="SectionOOIP",
+        y="EUR Residual",
         color="Classification",
         color_discrete_map=color_map,
         hover_data=["UWI"],
-        title="EUR Residual vs Section OOIP",
+        title="EUR Residual vs Section OOIP"
     )
+
     fig2.add_hline(y=0, line_dash="dash", line_color="black")
-    fig2.add_hline(y=cutoff, line_dash="dot",
-                   line_color="green",
-                   annotation_text=f"+{threshold}σ")
-    fig2.add_hline(y=-cutoff, line_dash="dot",
-                   line_color="red",
-                   annotation_text=f"-{threshold}σ")
+    fig2.add_hline(y=cutoff, line_dash="dot", line_color="green")
+    fig2.add_hline(y=-cutoff, line_dash="dot", line_color="red")
+
     st.plotly_chart(fig2, use_container_width=True)
 
 # ---------------------------------------------------------------------------
-# 8. DOWNLOAD
+# 8. TABLES
+# ---------------------------------------------------------------------------
+st.markdown("## Classified Prospects")
+
+display_cols = [
+    "UWI", "SectionOOIP", "Projected EUR",
+    "Predicted EUR", "EUR Residual",
+    "Efficiency", "Classification"
+]
+
+st.dataframe(pros[display_cols], use_container_width=True)
+
+st.markdown("## Summary")
+
+summary = pros["Classification"].value_counts().reset_index()
+summary.columns = ["Classification", "Count"]
+
+st.dataframe(summary, use_container_width=True)
+
+# ---------------------------------------------------------------------------
+# 9. DOWNLOAD
 # ---------------------------------------------------------------------------
 st.download_button(
     label="📥 Download Classified Prospects",
